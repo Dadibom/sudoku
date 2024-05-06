@@ -1,6 +1,7 @@
 <template>
   <div class="sudoku-grid">
     <div v-for="i in 9 * 9" :key="i" class="cell" :class="getClass(i)" @click="select(i)">
+      <div class="cell-idx">{{ i - 1 }}</div>
       <span v-if="grid[i-1]">{{ grid[i - 1] }}</span>
       <div v-else class="marks">
         <div v-for="j in 9" :key="j" class="mark">
@@ -13,6 +14,32 @@
   <div v-if="isValid" style="color: green">Sudoku is valid</div>
   <div v-else style="color: red">Sudoku is invalid</div>
   <div>Unfilled cells: {{ unfilledCells }}</div>
+  <table>
+    <thead>
+      <tr>
+        <th>Technique</th>
+        <th>Enabled</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Fill Single Possible Location In Row/Col/Box</td>
+        <td><input type="checkbox" v-model="tech.single_possibility_in_section"></td>
+      </tr>
+      <tr>
+        <td>Isolate Pairs</td>
+        <td><input type="checkbox" v-model="tech.isolate_pairs"></td>
+      </tr>
+      <tr>
+        <td>Forced Column Or Row In Box</td>
+        <td><input type="checkbox" v-model="tech.forced_column_or_row_in_box"></td>
+      </tr>
+      <tr>
+        <td>Isolate Triads</td>
+        <td><input type="checkbox" v-model="tech.isolate_triads"></td>
+      </tr>
+    </tbody>
+  </table>
 </template>
 
 <script>
@@ -113,6 +140,63 @@ function isolatePairs (grid, marks, getIndices) {
           const mark = marks[indices[i3]];
           mark[mark1Values[0] - 1] = false;
           mark[mark1Values[1] - 1] = false;
+        }
+      }
+    }
+  }
+}
+
+function generateNumberCombinations(n, max) {
+    let combinations = [];
+
+    function backtrack(start, currentCombo) {
+        if (currentCombo.length === n) {
+            combinations.push(currentCombo.slice());
+            return;
+        }
+
+        for (let i = start; i <= max; i++) {
+            currentCombo.push(i);
+            backtrack(i + 1, currentCombo);
+            currentCombo.pop();
+        }
+    }
+
+    backtrack(1, []);
+
+    return combinations;
+}
+
+function isolateExclusiveGroups (grid, marks, getIndices, n = 3) {
+  const combinations = generateNumberCombinations(n, 9);
+
+  for (let row = 0; row < 9; row++) {
+    const indices = getIndices(row).filter(i => !grid[i]);
+    
+    // find n cells that do not contain any other marks than the same n marks
+    // for example 1,2,3 in three cells
+    // or 1,2 2,3 1,3 in three cells
+    // if n cells contain only n marks, remove those marks from other cells in the section
+
+    for (const combination of combinations) {
+      let found = [];
+
+      for (let i of indices) {
+        const mark = marks[i];
+        // if cell contains any other marks than the combination, continue
+        if (mark.some((m, j) => m && !combination.includes(j + 1))) {
+          continue;
+        }
+        found.push(i);
+      }
+
+      if (found.length >= n) {
+        console.log('Found exclusive group:', row, combination, found);
+        for (let i of indices) {
+          if (!found.includes(i)) {
+            const mark = marks[i];
+            combination.forEach(v => mark[v - 1] = false);
+          }
         }
       }
     }
@@ -288,17 +372,25 @@ const testGrid3 = '0000030090000604001060000020800000000500900300040008500005380
 const testGrid4 = '304006000060000000000070250000209700000685000020000090901000400008040015000000003'.split('').map(Number);
 const testGrid5 = '000000000001030600400500900002700000009400100003005209800600500000000027100007060'.split('').map(Number);
 const testGrid6 = '040005600906003010070090000000500070004000000603020500000001008205030700090000000'.split('').map(Number);
+const testGrid7 = '370001000000902000000006510002000640190000000040009020004000150000800000600500700'.split('').map(Number);
+const testGrid8 = '860000013090000000200109600000001400037900000002007508020710005000003726004500000'.split('').map(Number);
 
 export default {
   name: "App",
   data() {
     return {
-      grid: testGrid4,
+      grid: testGrid8,
       marks: getMarkGrid(),
       selectedIndex: null,
+      tech: {
+        single_possibility_in_section: true,
+        isolate_pairs: true,
+        forced_column_or_row_in_box: true,
+        isolate_triads: true,
+      },
     };
   },
-  mounted () {
+  async mounted () {
     eliminateMarks(this.grid, this.marks, getRowIndices);
     eliminateMarks(this.grid, this.marks, getColumnIndices);
     eliminateMarks(this.grid, this.marks, getBoxIndices);
@@ -331,17 +423,35 @@ export default {
     },
     solveIteration () {
       let solved = 0;
-      solved += solveSinglePossibilities(this.grid, this.marks, getBoxIndices) || solveSinglePossibilities(this.grid, this.marks, getRowIndices) || solveSinglePossibilities(this.grid, this.marks, getColumnIndices);
+      if (this.tech.single_possibility_in_section) {
+        solved += solveSinglePossibilities(this.grid, this.marks, getBoxIndices) || solveSinglePossibilities(this.grid, this.marks, getRowIndices) || solveSinglePossibilities(this.grid, this.marks, getColumnIndices);
+      }
       solved += solveSingleMarks(this.grid, this.marks);
 
       console.log('Solved:', solved);
+
       eliminateMarks(this.grid, this.marks, getRowIndices);
       eliminateMarks(this.grid, this.marks, getColumnIndices);
       eliminateMarks(this.grid, this.marks, getBoxIndices);
-      isolatePairs(this.grid, this.marks, getRowIndices);
-      isolatePairs(this.grid, this.marks, getColumnIndices);
-      isolatePairs(this.grid, this.marks, getBoxIndices);
-      checkForcedRowOrColumnInBox(this.grid, this.marks);
+
+      if (this.tech.isolate_pairs) {
+        isolatePairs(this.grid, this.marks, getRowIndices);
+        isolatePairs(this.grid, this.marks, getColumnIndices);
+        isolatePairs(this.grid, this.marks, getBoxIndices);
+      }
+      if (this.tech.forced_column_or_row_in_box) {
+        checkForcedRowOrColumnInBox(this.grid, this.marks);
+      }
+
+      if (this.tech.isolate_triads) {
+        isolateExclusiveGroups(this.grid, this.marks, getRowIndices, 3);
+        isolateExclusiveGroups(this.grid, this.marks, getColumnIndices, 3);
+        isolateExclusiveGroups(this.grid, this.marks, getBoxIndices, 3);
+      }
+
+      //isolateExclusiveGroups(this.grid, this.marks, getRowIndices, 4);
+      //isolateExclusiveGroups(this.grid, this.marks, getColumnIndices, 4);
+      //isolateExclusiveGroups(this.grid, this.marks, getBoxIndices, 4);
     },
     getClass(i) {
       const row = Math.floor((i - 1) / 9);
@@ -373,6 +483,7 @@ export default {
   border: 1px solid #444;
   cursor: pointer;
   user-select: none;
+  position: relative;
 }
 .row-2,
 .row-5 {
@@ -408,6 +519,14 @@ export default {
 
 .selected {
   background-color: lightblue;
+}
+
+.cell-idx {
+  position: absolute;
+  top: 1px;
+  left: 2px;
+  font-size: 8px;
+  color: #ccc;
 }
 
 </style>
